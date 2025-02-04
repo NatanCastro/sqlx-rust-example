@@ -6,19 +6,24 @@ pub struct User {
     pub name: String,
 }
 
-impl User {
-    pub fn new(id: i32, name: String) -> Self {
-        Self { id, name }
-    }
+type SqliteQueryAs<'a, T> = QueryAs<'a, sqlx::Sqlite, T, sqlite::SqliteArguments<'a>>;
+
+trait QueryParamT<'a>:
+    sqlx::Encode<'a, sqlite::Sqlite> + sqlx::Type<sqlite::Sqlite> + Send + 'a
+{
+}
+impl<'a, T: sqlx::Encode<'a, sqlite::Sqlite> + sqlx::Type<sqlite::Sqlite> + Send + 'a>
+    QueryParamT<'a> for T
+{
 }
 
 fn bind_params<'a, T, P>(
-    query: QueryAs<'a, sqlx::Sqlite, T, sqlite::SqliteArguments<'a>>,
+    query: SqliteQueryAs<'a, T>,
     params: impl IntoIterator<Item = P>,
-) -> QueryAs<'a, sqlx::Sqlite, T, sqlite::SqliteArguments<'a>>
+) -> SqliteQueryAs<'a, T>
 where
     T: for<'r> FromRow<'r, sqlite::SqliteRow>,
-    P: sqlx::Encode<'a, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite> + Send + 'a,
+    P: QueryParamT<'a>,
 {
     let mut query = query;
     for param in params {
@@ -30,16 +35,18 @@ where
 fn build_query_with_params<'a, T, P>(
     query: &'a str,
     params: impl IntoIterator<Item = P>,
-) -> QueryAs<'a, sqlx::Sqlite, T, sqlite::SqliteArguments<'a>>
+) -> SqliteQueryAs<'a, T>
 where
     T: for<'r> FromRow<'r, sqlite::SqliteRow>,
-    P: sqlx::Encode<'a, sqlite::Sqlite> + sqlx::Type<sqlite::Sqlite> + Send + 'a,
+    P: QueryParamT<'a>,
 {
     let query = sqlx::query_as(query);
     bind_params(query, params)
 }
 
-async fn create_table(pool: &SqlitePool, query: &str) -> Result<(), sqlx::Error> {
+type QueryResult<T, E = sqlx::Error> = Result<T, E>;
+
+async fn create_table(pool: &SqlitePool, query: &str) -> QueryResult<()> {
     match sqlx::query(query).execute(pool).await {
         Ok(result) => {
             println!("{:?}", result);
@@ -49,16 +56,13 @@ async fn create_table(pool: &SqlitePool, query: &str) -> Result<(), sqlx::Error>
     }
 }
 
-async fn insert_user(pool: &SqlitePool, name: &str) -> Result<User, sqlx::Error> {
-    build_query_with_params(
-        "INSERT INTO users (name) VALUES (?) RETURNING *",
-        vec![name],
-    )
-    .fetch_one(pool)
-    .await
+async fn insert_user(pool: &SqlitePool, name: &str) -> QueryResult<User> {
+    build_query_with_params("INSERT INTO users (name) VALUES (?) RETURNING *", [name])
+        .fetch_one(pool)
+        .await
 }
 
-async fn find_users(pool: &SqlitePool) -> Result<Vec<User>, sqlx::Error> {
+async fn find_users(pool: &SqlitePool) -> QueryResult<Vec<User>> {
     sqlx::query_as("SELECT * FROM users").fetch_all(pool).await
 }
 
