@@ -39,21 +39,54 @@ where
     bind_params(query, params)
 }
 
+async fn create_table(pool: &SqlitePool, query: &str) -> Result<(), sqlx::Error> {
+    match sqlx::query(query).execute(pool).await {
+        Ok(result) => {
+            println!("{:?}", result);
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
+}
+
+async fn insert_user(pool: &SqlitePool, name: &str) -> Result<User, sqlx::Error> {
+    build_query_with_params(
+        "INSERT INTO users (name) VALUES (?) RETURNING *",
+        vec![name],
+    )
+    .fetch_one(pool)
+    .await
+}
+
+async fn find_users(pool: &SqlitePool) -> Result<Vec<User>, sqlx::Error> {
+    sqlx::query_as("SELECT * FROM users").fetch_all(pool).await
+}
+
 #[tokio::main]
 async fn main() {
     let pool = SqlitePool::connect(":memory:").await.unwrap();
-    sqlx::query("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
-        .execute(&pool)
-        .await
-        .unwrap();
-    let user: User = build_query_with_params("INSERT INTO users (name) VALUES (?)", ["Natan"])
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    println!("{:?}", user);
-    let users: Vec<User> = sqlx::query_as("SELECT * FROM users")
-        .fetch_all(&pool)
-        .await
-        .unwrap();
-    println!("{:?}", users);
+
+    create_table(
+        &pool,
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)",
+    )
+    .await
+    .unwrap();
+
+    let result: Result<User, sqlx::Error> = insert_user(&pool, "Natan").await;
+    match result {
+        Ok(user) => println!("{:?}", user),
+        Err(e) => println!("{:?}", e),
+    }
+    let result: Result<User, sqlx::Error> = insert_user(&pool, "Augusto").await;
+    match result {
+        Ok(user) => println!("{:?}", user),
+        Err(e) => println!("{:?}", e),
+    }
+
+    let result: Result<Vec<User>, sqlx::Error> = find_users(&pool).await;
+    match result {
+        Ok(users) => println!("{:?}", users),
+        Err(e) => println!("{:?}", e),
+    }
 }
